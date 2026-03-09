@@ -1,11 +1,209 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Multi-tenancy
+// ============================================================
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members        Member[]
+  socialAccounts SocialAccount[]
+  posts          Post[]
+  mediaAssets    MediaAsset[]
+}
+
+// ============================================================
+// Auth (NextAuth v5 standard tables)
+// ============================================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  password      String?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+  members  Member[]
+  posts    Post[]    @relation("postAuthor")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================================
+// Team membership (per-tenant roles)
+// ============================================================
+
+model Member {
+  id             String   @id @default(cuid())
+  userId         String
+  organizationId String
+  role           String   @default("EDITOR") // OWNER | EDITOR | VIEWER
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
+// ============================================================
+// Social account connections
+// ============================================================
+
+model SocialAccount {
+  id             String    @id @default(cuid())
+  organizationId String
+  platform       String    // LINKEDIN
+  accountType    String    // PERSONAL | COMPANY_PAGE
+  platformId     String
+  displayName    String
+  avatarUrl      String?
+  accessToken    String    // encrypted at rest
+  refreshToken   String?   // encrypted at rest
+  tokenExpiresAt DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  targets      PostTarget[]
+
+  @@unique([organizationId, platform, platformId])
+  @@index([organizationId])
+}
+
+// ============================================================
+// Posts
+// ============================================================
+
+model Post {
+  id             String    @id @default(cuid())
+  organizationId String
+  authorId       String
+  content        String
+  linkUrl        String?
+  status         String    @default("DRAFT") // DRAFT | SCHEDULED | PUBLISHING | PUBLISHED | FAILED
+  scheduledAt    DateTime?
+  publishedAt    DateTime?
+  errorMessage   String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  author       User         @relation("postAuthor", fields: [authorId], references: [id])
+  targets      PostTarget[]
+  media        PostMedia[]
+
+  @@index([organizationId, status])
+  @@index([status, scheduledAt])
+}
+
+model PostTarget {
+  id              String    @id @default(cuid())
+  postId          String
+  socialAccountId String
+  platformPostId  String?
+  status          String    @default("PENDING") // PENDING | PUBLISHED | FAILED
+  errorMessage    String?
+  publishedAt     DateTime?
+
+  // Analytics
+  likes       Int @default(0)
+  comments    Int @default(0)
+  shares      Int @default(0)
+  clicks      Int @default(0)
+  impressions Int @default(0)
+  lastSyncedAt DateTime?
+
+  post          Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  socialAccount SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, socialAccountId])
+  @@index([postId])
+}
+
+// ============================================================
+// Media
+// ============================================================
+
+model MediaAsset {
+  id             String   @id @default(cuid())
+  organizationId String
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  storageKey     String
+  width          Int?
+  height         Int?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  posts        PostMedia[]
+
+  @@index([organizationId])
+}
+
+model PostMedia {
+  id           String @id @default(cuid())
+  postId       String
+  mediaAssetId String
+  sortOrder    Int    @default(0)
+
+  post       Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  mediaAsset MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, mediaAssetId])
+  @@index([postId])
 }
