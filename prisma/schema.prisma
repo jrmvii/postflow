@@ -18,10 +18,30 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members        Member[]
-  socialAccounts SocialAccount[]
-  posts          Post[]
-  mediaAssets    MediaAsset[]
+  members           Member[]
+  socialAccounts    SocialAccount[]
+  posts             Post[]
+  mediaAssets       MediaAsset[]
+  integrationConfig IntegrationConfig?
+}
+
+// ============================================================
+// Integration config (Positio + Vigie connections)
+// ============================================================
+
+model IntegrationConfig {
+  id                String   @id @default(cuid())
+  organizationId    String   @unique
+  positioUrl        String?
+  positioApiKey     String?  // encrypted at rest
+  positioCollection String?
+  vigieUrl          String?
+  vigieApiKey       String?  // encrypted at rest
+  vigieCollection   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 }
 
 // ============================================================
@@ -138,6 +158,10 @@ model Post {
   scheduledAt    DateTime?
   publishedAt    DateTime?
   errorMessage   String?
+  sourceType     String?   // null (manual) | "vigie"
+  sourceGroupId  String?   // Vigie group ID
+  sourceSummary  String?   // summary used for generation
+  sourceArticles String?   // JSON [{title, url, sourceName}]
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 

@@ -11,6 +11,10 @@ const createPostSchema = z.object({
   linkUrl: z.string().url().optional().or(z.literal("")),
   socialAccountIds: z.array(z.string()).min(1),
   scheduledAt: z.string().optional(), // ISO string
+  sourceType: z.string().optional(),
+  sourceGroupId: z.string().optional(),
+  sourceSummary: z.string().optional(),
+  sourceArticles: z.string().optional(), // JSON string
 });
 
 export const createPost = withAuth(async (session: any, formData: FormData) => {
@@ -21,12 +25,16 @@ export const createPost = withAuth(async (session: any, formData: FormData) => {
     linkUrl: (formData.get("linkUrl") as string) || undefined,
     socialAccountIds: formData.getAll("socialAccountIds") as string[],
     scheduledAt: (formData.get("scheduledAt") as string) || undefined,
+    sourceType: (formData.get("sourceType") as string) || undefined,
+    sourceGroupId: (formData.get("sourceGroupId") as string) || undefined,
+    sourceSummary: (formData.get("sourceSummary") as string) || undefined,
+    sourceArticles: (formData.get("sourceArticles") as string) || undefined,
   };
 
   const parsed = createPostSchema.safeParse(raw);
   if (!parsed.success) return { error: "Données invalides" };
 
-  const { content, linkUrl, socialAccountIds, scheduledAt } = parsed.data;
+  const { content, linkUrl, socialAccountIds, scheduledAt, sourceType, sourceGroupId, sourceSummary, sourceArticles } = parsed.data;
 
   // Verify social accounts belong to this org
   const accounts = await db.socialAccount.findMany({
@@ -51,6 +59,10 @@ export const createPost = withAuth(async (session: any, formData: FormData) => {
       linkUrl: linkUrl || null,
       status,
       scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+      sourceType: sourceType || null,
+      sourceGroupId: sourceGroupId || null,
+      sourceSummary: sourceSummary || null,
+      sourceArticles: sourceArticles || null,
       targets: {
         create: socialAccountIds.map((id) => ({
           socialAccountId: id,

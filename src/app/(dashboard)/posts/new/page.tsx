@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createPost, publishPost } from "@/lib/actions/posts";
 import { getSocialAccounts } from "@/lib/actions/social-accounts";
 
@@ -15,8 +15,15 @@ type SocialAccount = {
   isActive: boolean;
 };
 
+type SourceArticle = {
+  title: string;
+  url: string;
+  sourceName: string;
+};
+
 export default function NewPostPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [content, setContent] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
@@ -24,6 +31,30 @@ export default function NewPostPage() {
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showArticles, setShowArticles] = useState(false);
+
+  // Provenance metadata from query params (set by feed page)
+  const [sourceType] = useState(() => searchParams.get("sourceType") || "");
+  const [sourceGroupId] = useState(
+    () => searchParams.get("sourceGroupId") || ""
+  );
+  const [sourceSummary] = useState(
+    () => searchParams.get("sourceSummary") || ""
+  );
+  const [sourceArticles] = useState<SourceArticle[]>(() => {
+    const raw = searchParams.get("sourceArticles");
+    if (!raw) return [];
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    const prefill = searchParams.get("content");
+    if (prefill) setContent(prefill);
+  }, [searchParams]);
 
   useEffect(() => {
     getSocialAccounts().then((result) => {
@@ -64,6 +95,14 @@ export default function NewPostPage() {
     }
     selectedAccounts.forEach((id) => formData.append("socialAccountIds", id));
 
+    // Provenance fields
+    if (sourceType) formData.set("sourceType", sourceType);
+    if (sourceGroupId) formData.set("sourceGroupId", sourceGroupId);
+    if (sourceSummary) formData.set("sourceSummary", sourceSummary);
+    if (sourceArticles.length > 0) {
+      formData.set("sourceArticles", JSON.stringify(sourceArticles));
+    }
+
     const result = await createPost(formData);
 
     if (result && "error" in result) {
@@ -87,6 +126,44 @@ export default function NewPostPage() {
   return (
     <div className="max-w-2xl space-y-6">
       <h2 className="text-2xl font-bold">Nouveau post</h2>
+
+      {/* Provenance banner */}
+      {sourceType === "vigie" && sourceArticles.length > 0 && (
+        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="font-medium text-blue-800">
+              Généré à partir de {sourceArticles.length} article
+              {sourceArticles.length > 1 ? "s" : ""} de veille
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowArticles(!showArticles)}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              {showArticles ? "Masquer" : "Voir les sources"}
+            </button>
+          </div>
+          {showArticles && (
+            <ul className="mt-2 space-y-1 border-t border-blue-200 pt-2">
+              {sourceArticles.map((article, i) => (
+                <li key={i} className="text-xs text-blue-700">
+                  <a
+                    href={article.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:underline"
+                  >
+                    {article.title}
+                  </a>
+                  <span className="ml-1 text-blue-400">
+                    — {article.sourceName}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="rounded-md bg-red-50 p-3 text-sm text-red-600">
