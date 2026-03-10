@@ -80,7 +80,7 @@ export default function FeedPage() {
     setProgress(null);
     pollRef.current = setInterval(async () => {
       const p = await getRefreshStatus();
-      if (p) setProgress(p);
+      if (p && !("error" in p)) setProgress(p);
     }, 2000);
     const result = await refreshNewsFeed();
     if (pollRef.current) clearInterval(pollRef.current);
