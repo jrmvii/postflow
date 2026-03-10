@@ -14,12 +14,18 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
-# Dummy DATABASE_URL for prisma generate + next build (real URL injected at runtime)
-ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+
+# Accept real DATABASE_URL as build arg for prisma db push
+ARG DATABASE_URL
+ENV DATABASE_URL=${DATABASE_URL:-postgresql://dummy:dummy@localhost:5432/dummy}
 
 # Switch Prisma to PostgreSQL for production
 RUN sed -i 's/provider = "sqlite"/provider = "postgresql"/' prisma/schema.prisma
 RUN npx prisma generate
+
+# Push schema to production DB if real DATABASE_URL is provided
+RUN if echo "$DATABASE_URL" | grep -qv "dummy"; then npx prisma db push --skip-generate --accept-data-loss; fi
+
 RUN npm run build
 
 FROM base AS runner
@@ -39,19 +45,10 @@ RUN chown nextjs:nodejs .next
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Copy prisma schema + client for db push at startup
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
-
-COPY entrypoint.sh ./
-RUN chmod +x entrypoint.sh
-
 USER nextjs
 
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["./entrypoint.sh"]
+CMD ["node", "server.js"]
