@@ -6,6 +6,7 @@ interface LinkedInPostOptions {
   authorUrn: string; // e.g. "urn:li:person:xxx" or "urn:li:organization:xxx"
   content: string;
   linkUrl?: string;
+  imageUrn?: string;
 }
 
 interface LinkedInPostResult {
@@ -29,8 +30,14 @@ export async function createLinkedInPost(
     lifecycleState: "PUBLISHED",
   };
 
-  // Add link attachment if provided
-  if (options.linkUrl) {
+  // Add media attachment (image takes priority over link)
+  if (options.imageUrn) {
+    body.content = {
+      media: {
+        id: options.imageUrn,
+      },
+    };
+  } else if (options.linkUrl) {
     body.content = {
       article: {
         source: options.linkUrl,
@@ -106,6 +113,64 @@ export async function getLinkedInOrganizations(
   const data = await response.json();
   // Each element has an "organization" field like "urn:li:organization:123456"
   return (data.elements ?? []).map((el: any) => el.organization as string);
+}
+
+/**
+ * Initialize an image upload on LinkedIn.
+ * Returns the upload URL and image URN.
+ */
+export async function initializeImageUpload(
+  accessToken: string,
+  authorUrn: string
+): Promise<{ uploadUrl: string; imageUrn: string }> {
+  const response = await fetch(
+    `${LINKEDIN_API}/rest/images?action=initializeUpload`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "LinkedIn-Version": LINKEDIN_VERSION,
+        "X-Restli-Protocol-Version": "2.0.0",
+      },
+      body: JSON.stringify({
+        initializeUploadRequest: { owner: authorUrn },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LinkedIn initializeUpload ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  return {
+    uploadUrl: data.value.uploadUrl,
+    imageUrn: data.value.image,
+  };
+}
+
+/**
+ * Upload image binary data to the LinkedIn upload URL.
+ */
+export async function uploadImageToLinkedIn(
+  uploadUrl: string,
+  imageBuffer: Buffer,
+  contentType: string
+): Promise<void> {
+  const response = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": contentType,
+    },
+    body: new Uint8Array(imageBuffer),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LinkedIn image upload ${response.status}: ${errorText}`);
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createPost, publishPost } from "@/lib/actions/posts";
 import { getSocialAccounts } from "@/lib/actions/social-accounts";
@@ -29,6 +29,9 @@ export default function NewPostPage() {
   const [scheduledAt, setScheduledAt] = useState("");
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showArticles, setShowArticles] = useState(false);
@@ -64,6 +67,29 @@ export default function NewPostPage() {
     });
   }, []);
 
+  function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("Seules les images sont acceptées (JPEG, PNG, GIF, WebP)");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError("Image trop volumineuse (max 10 MB)");
+      return;
+    }
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+    setError(null);
+  }
+
+  function removeImage() {
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImageFile(null);
+    setImagePreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
   function toggleAccount(id: string) {
     setSelectedAccounts((prev) =>
       prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]
@@ -94,6 +120,8 @@ export default function NewPostPage() {
       formData.set("scheduledAt", new Date(scheduledAt).toISOString());
     }
     selectedAccounts.forEach((id) => formData.append("socialAccountIds", id));
+
+    if (imageFile) formData.set("image", imageFile);
 
     // Provenance fields
     if (sourceType) formData.set("sourceType", sourceType);
@@ -225,6 +253,45 @@ export default function NewPostPage() {
           placeholder="Rédigez votre post ici..."
           className="mt-1 w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+      </div>
+
+      {/* Image */}
+      <div>
+        <label className="text-sm font-medium">Image (optionnel)</label>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/gif,image/webp"
+          onChange={handleImageSelect}
+          className="hidden"
+        />
+        {imagePreview ? (
+          <div className="mt-2 relative inline-block">
+            <img
+              src={imagePreview}
+              alt="Preview"
+              className="max-h-48 rounded-md border"
+            />
+            <button
+              type="button"
+              onClick={removeImage}
+              className="absolute -top-2 -right-2 rounded-full bg-red-500 text-white w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600"
+            >
+              X
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="mt-2 w-full rounded-md border-2 border-dashed border-gray-300 px-4 py-6 text-sm text-gray-500 hover:border-gray-400 hover:text-gray-600 transition-colors"
+          >
+            Cliquer pour ajouter une image
+            <span className="block text-xs text-gray-400 mt-1">
+              JPEG, PNG, GIF, WebP — max 10 MB
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Link URL */}

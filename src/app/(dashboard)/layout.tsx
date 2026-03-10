@@ -24,6 +24,7 @@ export default async function DashboardLayout({
         <nav className="space-y-1 flex-1">
           <NavLink href="/dashboard">Tableau de bord</NavLink>
           <NavLink href="/posts/new">Nouveau post</NavLink>
+          <NavLink href="/calendar">Calendrier</NavLink>
           <NavLink href="/feed">Veille</NavLink>
           <NavLink href="/accounts">Comptes sociaux</NavLink>
           <NavLink href="/settings">Paramètres</NavLink>
