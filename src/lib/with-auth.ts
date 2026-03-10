@@ -36,6 +36,9 @@ export function withAuth<T>(
 export function withAuth<A, T>(
   handler: (session: AuthSession, arg: A) => Promise<T>
 ): (arg: A) => Promise<T | { error: string }>;
+export function withAuth<A, B, T>(
+  handler: (session: AuthSession, arg1: A, arg2: B) => Promise<T>
+): (arg1: A, arg2: B) => Promise<T | { error: string }>;
 export function withAuth(
   handler: (session: AuthSession, ...args: unknown[]) => Promise<unknown>
 ) {
@@ -55,6 +58,9 @@ export function withOwnerAuth<T>(
 export function withOwnerAuth<A, T>(
   handler: (session: AuthSession, arg: A) => Promise<T>
 ): (arg: A) => Promise<T | { error: string }>;
+export function withOwnerAuth<A, B, T>(
+  handler: (session: AuthSession, arg1: A, arg2: B) => Promise<T>
+): (arg1: A, arg2: B) => Promise<T | { error: string }>;
 export function withOwnerAuth(
   handler: (session: AuthSession, ...args: unknown[]) => Promise<unknown>
 ) {
