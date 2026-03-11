@@ -149,21 +149,27 @@ model SocialAccount {
 // ============================================================
 
 model Post {
-  id             String    @id @default(cuid())
-  organizationId String
-  authorId       String
-  content        String
-  linkUrl        String?
-  status         String    @default("DRAFT") // DRAFT | SCHEDULED | PUBLISHING | PUBLISHED | FAILED
-  scheduledAt    DateTime?
-  publishedAt    DateTime?
-  errorMessage   String?
-  sourceType     String?   // null (manual) | "vigie"
-  sourceGroupId  String?   // Vigie group ID
-  sourceSummary  String?   // summary used for generation
-  sourceArticles String?   // JSON [{title, url, sourceName}]
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id              String    @id @default(cuid())
+  organizationId  String
+  authorId        String
+  content         String
+  linkUrl         String?
+  postType        String    @default("TEXT") // TEXT | IMAGE | MULTI_IMAGE | VIDEO | DOCUMENT | POLL | ARTICLE | RESHARE
+  status          String    @default("DRAFT") // DRAFT | SCHEDULED | PUBLISHING | PUBLISHED | FAILED
+  scheduledAt     DateTime?
+  publishedAt     DateTime?
+  errorMessage    String?
+  pollQuestion    String?
+  pollOptions     String?   // JSON ["Option 1", "Option 2", ...]
+  pollDuration    String?   // ONE_DAY | THREE_DAYS | ONE_WEEK | TWO_WEEKS
+  resharedPostUrn String?
+  documentTitle   String?   // Title displayed on document posts
+  sourceType      String?   // null (manual) | "vigie"
+  sourceGroupId   String?   // Vigie group ID
+  sourceSummary   String?   // summary used for generation
+  sourceArticles  String?   // JSON [{title, url, sourceName}]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   author       User         @relation("postAuthor", fields: [authorId], references: [id])

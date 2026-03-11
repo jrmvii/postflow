@@ -1,12 +1,21 @@
 const LINKEDIN_API = "https://api.linkedin.com";
-const LINKEDIN_VERSION = "202401";
+const LINKEDIN_VERSION = "202501";
+
+export type LinkedInPostContent =
+  | { type: "none" }
+  | { type: "image"; imageUrn: string }
+  | { type: "multiImage"; imageUrns: string[] }
+  | { type: "video"; videoUrn: string }
+  | { type: "document"; documentUrn: string; title?: string }
+  | { type: "article"; url: string }
+  | { type: "poll"; question: string; options: string[]; duration: string }
+  | { type: "reshare"; resharedPostUrn: string };
 
 interface LinkedInPostOptions {
   accessToken: string;
-  authorUrn: string; // e.g. "urn:li:person:xxx" or "urn:li:organization:xxx"
-  content: string;
-  linkUrl?: string;
-  imageUrn?: string;
+  authorUrn: string;
+  commentary: string;
+  content: LinkedInPostContent;
 }
 
 interface LinkedInPostResult {
@@ -15,12 +24,39 @@ interface LinkedInPostResult {
   error?: string;
 }
 
+function buildPostContent(content: LinkedInPostContent): Record<string, any> | undefined {
+  switch (content.type) {
+    case "none":
+      return undefined;
+    case "image":
+      return { media: { id: content.imageUrn } };
+    case "multiImage":
+      return { multiImage: { images: content.imageUrns.map((id) => ({ id })) } };
+    case "video":
+      return { media: { id: content.videoUrn } };
+    case "document":
+      return { media: { id: content.documentUrn, title: content.title } };
+    case "article":
+      return { article: { source: content.url } };
+    case "poll":
+      return {
+        poll: {
+          question: content.question,
+          options: content.options.map((text) => ({ text })),
+          settings: { duration: content.duration },
+        },
+      };
+    case "reshare":
+      return { reshare: { resharedPost: content.resharedPostUrn } };
+  }
+}
+
 export async function createLinkedInPost(
   options: LinkedInPostOptions
 ): Promise<LinkedInPostResult> {
   const body: any = {
     author: options.authorUrn,
-    commentary: options.content,
+    commentary: options.commentary,
     visibility: "PUBLIC",
     distribution: {
       feedDistribution: "MAIN_FEED",
@@ -30,19 +66,9 @@ export async function createLinkedInPost(
     lifecycleState: "PUBLISHED",
   };
 
-  // Add media attachment (image takes priority over link)
-  if (options.imageUrn) {
-    body.content = {
-      media: {
-        id: options.imageUrn,
-      },
-    };
-  } else if (options.linkUrl) {
-    body.content = {
-      article: {
-        source: options.linkUrl,
-      },
-    };
+  const content = buildPostContent(options.content);
+  if (content) {
+    body.content = content;
   }
 
   try {
@@ -170,6 +196,163 @@ export async function uploadImageToLinkedIn(
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`LinkedIn image upload ${response.status}: ${errorText}`);
+  }
+}
+
+/**
+ * Initialize a document upload on LinkedIn.
+ * Returns the upload URL and document URN.
+ */
+export async function initializeDocumentUpload(
+  accessToken: string,
+  authorUrn: string
+): Promise<{ uploadUrl: string; documentUrn: string }> {
+  const response = await fetch(
+    `${LINKEDIN_API}/rest/documents?action=initializeUpload`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "LinkedIn-Version": LINKEDIN_VERSION,
+        "X-Restli-Protocol-Version": "2.0.0",
+      },
+      body: JSON.stringify({
+        initializeUploadRequest: { owner: authorUrn },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LinkedIn document initializeUpload ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  return {
+    uploadUrl: data.value.uploadUrl,
+    documentUrn: data.value.document,
+  };
+}
+
+/**
+ * Upload document binary data to the LinkedIn upload URL.
+ */
+export async function uploadDocumentToLinkedIn(
+  uploadUrl: string,
+  buffer: Buffer,
+  contentType: string
+): Promise<void> {
+  const response = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": contentType,
+    },
+    body: new Uint8Array(buffer),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LinkedIn document upload ${response.status}: ${errorText}`);
+  }
+}
+
+/**
+ * Initialize a video upload on LinkedIn.
+ * Returns the upload URL, video URN, and upload token.
+ */
+export async function initializeVideoUpload(
+  accessToken: string,
+  authorUrn: string,
+  fileSizeBytes: number
+): Promise<{ uploadUrl: string; videoUrn: string; uploadToken: string }> {
+  const response = await fetch(
+    `${LINKEDIN_API}/rest/videos?action=initializeUpload`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "LinkedIn-Version": LINKEDIN_VERSION,
+        "X-Restli-Protocol-Version": "2.0.0",
+      },
+      body: JSON.stringify({
+        initializeUploadRequest: {
+          owner: authorUrn,
+          fileSizeBytes,
+          uploadCaptions: false,
+          uploadThumbnail: false,
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LinkedIn video initializeUpload ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  const uploadInstructions = data.value.uploadInstructions?.[0];
+  return {
+    uploadUrl: uploadInstructions?.uploadUrl ?? data.value.uploadUrl,
+    videoUrn: data.value.video,
+    uploadToken: uploadInstructions?.uploadToken ?? "",
+  };
+}
+
+/**
+ * Upload video binary data to the LinkedIn upload URL.
+ */
+export async function uploadVideoToLinkedIn(
+  uploadUrl: string,
+  buffer: Buffer,
+  contentType: string
+): Promise<void> {
+  const response = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": contentType,
+    },
+    body: new Uint8Array(buffer),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LinkedIn video upload ${response.status}: ${errorText}`);
+  }
+}
+
+/**
+ * Finalize a video upload on LinkedIn.
+ */
+export async function finalizeVideoUpload(
+  accessToken: string,
+  videoUrn: string,
+  uploadToken: string
+): Promise<void> {
+  const response = await fetch(
+    `${LINKEDIN_API}/rest/videos?action=finalizeUpload`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "LinkedIn-Version": LINKEDIN_VERSION,
+        "X-Restli-Protocol-Version": "2.0.0",
+      },
+      body: JSON.stringify({
+        finalizeUploadRequest: {
+          video: videoUrn,
+          uploadToken,
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LinkedIn video finalizeUpload ${response.status}: ${errorText}`);
   }
 }
 

@@ -28,7 +28,7 @@ async function publishDuePosts() {
       },
       include: {
         targets: { include: { socialAccount: true } },
-        media: { include: { mediaAsset: true }, take: 1 },
+        media: { include: { mediaAsset: true }, orderBy: { sortOrder: "asc" } },
       },
     });
 

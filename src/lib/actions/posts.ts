@@ -12,6 +12,11 @@ const createPostSchema = z.object({
   linkUrl: z.string().url().optional().or(z.literal("")),
   socialAccountIds: z.array(z.string()).min(1),
   scheduledAt: z.string().optional(), // ISO string
+  pollQuestion: z.string().max(140).optional(),
+  pollOptions: z.string().optional(), // JSON string
+  pollDuration: z.string().optional(),
+  resharedPostUrn: z.string().optional(),
+  documentTitle: z.string().max(200).optional(),
   sourceType: z.string().optional(),
   sourceGroupId: z.string().optional(),
   sourceSummary: z.string().optional(),
@@ -26,6 +31,11 @@ export const createPost = withAuth(async (session: any, formData: FormData) => {
     linkUrl: (formData.get("linkUrl") as string) || undefined,
     socialAccountIds: formData.getAll("socialAccountIds") as string[],
     scheduledAt: (formData.get("scheduledAt") as string) || undefined,
+    pollQuestion: (formData.get("pollQuestion") as string) || undefined,
+    pollOptions: (formData.get("pollOptions") as string) || undefined,
+    pollDuration: (formData.get("pollDuration") as string) || undefined,
+    resharedPostUrn: (formData.get("resharedPostUrn") as string) || undefined,
+    documentTitle: (formData.get("documentTitle") as string) || undefined,
     sourceType: (formData.get("sourceType") as string) || undefined,
     sourceGroupId: (formData.get("sourceGroupId") as string) || undefined,
     sourceSummary: (formData.get("sourceSummary") as string) || undefined,
@@ -35,7 +45,11 @@ export const createPost = withAuth(async (session: any, formData: FormData) => {
   const parsed = createPostSchema.safeParse(raw);
   if (!parsed.success) return { error: "Données invalides" };
 
-  const { content, linkUrl, socialAccountIds, scheduledAt, sourceType, sourceGroupId, sourceSummary, sourceArticles } = parsed.data;
+  const {
+    content, linkUrl, socialAccountIds, scheduledAt,
+    pollQuestion, pollOptions, pollDuration, resharedPostUrn, documentTitle,
+    sourceType, sourceGroupId, sourceSummary, sourceArticles,
+  } = parsed.data;
 
   // Verify social accounts belong to this org
   const accounts = await db.socialAccount.findMany({
@@ -52,13 +66,15 @@ export const createPost = withAuth(async (session: any, formData: FormData) => {
 
   const status = scheduledAt ? "SCHEDULED" : "DRAFT";
 
-  // Handle image upload
-  const imageFile = formData.get("image") as File | null;
-  let mediaAssetId: string | null = null;
+  // Handle file uploads (multiple images, or single video/document)
+  const files = formData.getAll("files") as File[];
+  const mediaAssetIds: string[] = [];
 
-  if (imageFile && imageFile.size > 0) {
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    if (!file || file.size === 0) continue;
     try {
-      const stored = await saveUploadedFile(imageFile, session.user.organizationId);
+      const stored = await saveUploadedFile(file, session.user.organizationId);
       const asset = await db.mediaAsset.create({
         data: {
           organizationId: session.user.organizationId,
@@ -68,9 +84,31 @@ export const createPost = withAuth(async (session: any, formData: FormData) => {
           storageKey: stored.storageKey,
         },
       });
-      mediaAssetId = asset.id;
+      mediaAssetIds.push(asset.id);
     } catch (e) {
-      return { error: e instanceof Error ? e.message : "Erreur upload image" };
+      return { error: e instanceof Error ? e.message : "Erreur upload fichier" };
+    }
+  }
+
+  // Legacy single image support (backwards compat)
+  if (mediaAssetIds.length === 0) {
+    const imageFile = formData.get("image") as File | null;
+    if (imageFile && imageFile.size > 0) {
+      try {
+        const stored = await saveUploadedFile(imageFile, session.user.organizationId);
+        const asset = await db.mediaAsset.create({
+          data: {
+            organizationId: session.user.organizationId,
+            fileName: stored.fileName,
+            mimeType: stored.mimeType,
+            sizeBytes: stored.sizeBytes,
+            storageKey: stored.storageKey,
+          },
+        });
+        mediaAssetIds.push(asset.id);
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : "Erreur upload image" };
+      }
     }
   }
 
@@ -82,6 +120,11 @@ export const createPost = withAuth(async (session: any, formData: FormData) => {
       linkUrl: linkUrl || null,
       status,
       scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+      pollQuestion: pollQuestion || null,
+      pollOptions: pollOptions || null,
+      pollDuration: pollDuration || null,
+      resharedPostUrn: resharedPostUrn || null,
+      documentTitle: documentTitle || null,
       sourceType: sourceType || null,
       sourceGroupId: sourceGroupId || null,
       sourceSummary: sourceSummary || null,
@@ -95,9 +138,10 @@ export const createPost = withAuth(async (session: any, formData: FormData) => {
     include: { targets: true },
   });
 
-  if (mediaAssetId) {
+  // Create PostMedia records with sortOrder
+  for (let i = 0; i < mediaAssetIds.length; i++) {
     await db.postMedia.create({
-      data: { postId: post.id, mediaAssetId },
+      data: { postId: post.id, mediaAssetId: mediaAssetIds[i], sortOrder: i },
     });
   }
 
@@ -114,7 +158,7 @@ export const publishPost = withAuth(async (session: any, postId: string) => {
     },
     include: {
       targets: { include: { socialAccount: true } },
-      media: { include: { mediaAsset: true }, take: 1 },
+      media: { include: { mediaAsset: true }, orderBy: { sortOrder: "asc" } },
     },
   });
 
@@ -160,7 +204,7 @@ export const getPost = withAuth(async (session: any, postId: string) => {
           },
         },
       },
-      media: { include: { mediaAsset: true }, take: 1 },
+      media: { include: { mediaAsset: true }, orderBy: { sortOrder: "asc" } },
     },
   });
 
@@ -173,7 +217,12 @@ const updatePostSchema = z.object({
   content: z.string().min(1).max(3000),
   linkUrl: z.string().url().optional().or(z.literal("")),
   scheduledAt: z.string().optional(),
-  removeImage: z.string().optional(),
+  removeMedia: z.string().optional(),
+  pollQuestion: z.string().max(140).optional(),
+  pollOptions: z.string().optional(),
+  pollDuration: z.string().optional(),
+  resharedPostUrn: z.string().optional(),
+  documentTitle: z.string().max(200).optional(),
 });
 
 export const updatePost = withAuth(async (session: any, formData: FormData) => {
@@ -184,20 +233,28 @@ export const updatePost = withAuth(async (session: any, formData: FormData) => {
     content: formData.get("content") as string,
     linkUrl: (formData.get("linkUrl") as string) || undefined,
     scheduledAt: (formData.get("scheduledAt") as string) || undefined,
-    removeImage: (formData.get("removeImage") as string) || undefined,
+    removeMedia: (formData.get("removeMedia") as string) || undefined,
+    pollQuestion: (formData.get("pollQuestion") as string) || undefined,
+    pollOptions: (formData.get("pollOptions") as string) || undefined,
+    pollDuration: (formData.get("pollDuration") as string) || undefined,
+    resharedPostUrn: (formData.get("resharedPostUrn") as string) || undefined,
+    documentTitle: (formData.get("documentTitle") as string) || undefined,
   };
 
   const parsed = updatePostSchema.safeParse(raw);
   if (!parsed.success) return { error: "Données invalides" };
 
-  const { postId, content, linkUrl, scheduledAt, removeImage } = parsed.data;
+  const {
+    postId, content, linkUrl, scheduledAt, removeMedia,
+    pollQuestion, pollOptions, pollDuration, resharedPostUrn, documentTitle,
+  } = parsed.data;
 
   const post = await db.post.findFirst({
     where: {
       id: postId,
       organizationId: session.user.organizationId,
     },
-    include: { media: { include: { mediaAsset: true }, take: 1 } },
+    include: { media: { include: { mediaAsset: true } } },
   });
 
   if (!post) return { error: "Post introuvable" };
@@ -205,21 +262,48 @@ export const updatePost = withAuth(async (session: any, formData: FormData) => {
 
   const status = scheduledAt ? "SCHEDULED" : "DRAFT";
 
-  // Handle image: remove old if requested or replacing
+  // Handle media: remove all existing if requested or replacing
+  const newFiles = formData.getAll("files") as File[];
+  const hasNewFiles = newFiles.some((f) => f && f.size > 0);
+
+  // Legacy single image support
   const newImageFile = formData.get("image") as File | null;
   const hasNewImage = newImageFile && newImageFile.size > 0;
 
-  if ((removeImage === "true" || hasNewImage) && post.media[0]) {
-    // Delete the physical file
-    try {
-      await unlink(getUploadPath(post.media[0].mediaAsset.storageKey));
-    } catch { /* file may already be missing */ }
-    await db.postMedia.delete({ where: { id: post.media[0].id } });
-    await db.mediaAsset.delete({ where: { id: post.media[0].mediaAssetId } });
+  if ((removeMedia === "true" || hasNewFiles || hasNewImage) && post.media.length > 0) {
+    for (const pm of post.media) {
+      try {
+        await unlink(getUploadPath(pm.mediaAsset.storageKey));
+      } catch { /* file may already be missing */ }
+      await db.postMedia.delete({ where: { id: pm.id } });
+      await db.mediaAsset.delete({ where: { id: pm.mediaAssetId } });
+    }
   }
 
-  // Upload new image if provided
-  if (hasNewImage) {
+  // Upload new files if provided
+  if (hasNewFiles) {
+    let sortOrder = 0;
+    for (const file of newFiles) {
+      if (!file || file.size === 0) continue;
+      try {
+        const stored = await saveUploadedFile(file, session.user.organizationId);
+        const asset = await db.mediaAsset.create({
+          data: {
+            organizationId: session.user.organizationId,
+            fileName: stored.fileName,
+            mimeType: stored.mimeType,
+            sizeBytes: stored.sizeBytes,
+            storageKey: stored.storageKey,
+          },
+        });
+        await db.postMedia.create({
+          data: { postId, mediaAssetId: asset.id, sortOrder: sortOrder++ },
+        });
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : "Erreur upload fichier" };
+      }
+    }
+  } else if (hasNewImage) {
     try {
       const stored = await saveUploadedFile(newImageFile!, session.user.organizationId);
       const asset = await db.mediaAsset.create({
@@ -246,6 +330,11 @@ export const updatePost = withAuth(async (session: any, formData: FormData) => {
       linkUrl: linkUrl || null,
       status,
       scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+      pollQuestion: pollQuestion || null,
+      pollOptions: pollOptions || null,
+      pollDuration: pollDuration || null,
+      resharedPostUrn: resharedPostUrn || null,
+      documentTitle: documentTitle || null,
     },
   });
 
@@ -298,6 +387,7 @@ export const getPostsForCalendar = withAuth(
         id: true,
         content: true,
         status: true,
+        postType: true,
         scheduledAt: true,
         publishedAt: true,
         createdAt: true,
