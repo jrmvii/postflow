@@ -1,7 +1,7 @@
 const LINKEDIN_AUTH_URL = "https://www.linkedin.com/oauth/v2/authorization";
 const LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken";
 
-const SCOPES = ["openid", "profile", "email", "w_member_social", "w_organization_social"];
+const SCOPES = ["openid", "profile", "email", "w_member_social"];
 
 export function getLinkedInAuthUrl(state: string): string {
   const params = new URLSearchParams({

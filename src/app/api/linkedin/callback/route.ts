@@ -76,8 +76,13 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // 2. Fetch and save company pages the user admins
-    const orgUrns = await getLinkedInOrganizations(tokens.access_token);
+    // 2. Fetch and save company pages the user admins (requires w_organization_social scope)
+    let orgUrns: string[] = [];
+    try {
+      orgUrns = await getLinkedInOrganizations(tokens.access_token);
+    } catch {
+      // w_organization_social scope not available yet — skip org pages
+    }
 
     for (const orgUrn of orgUrns) {
       const orgDetails = await getLinkedInOrganization(
