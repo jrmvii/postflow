@@ -10,6 +10,7 @@ import { encrypt } from "@/lib/encryption";
 import { db } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
+  const baseUrl = process.env.NEXTAUTH_URL || request.url;
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   const state = searchParams.get("state");
@@ -17,20 +18,20 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     return NextResponse.redirect(
-      new URL(`/accounts?error=${encodeURIComponent(error)}`, request.url)
+      new URL(`/accounts?error=${encodeURIComponent(error)}`, baseUrl)
     );
   }
 
   if (!code || !state) {
     return NextResponse.redirect(
-      new URL("/accounts?error=missing_params", request.url)
+      new URL("/accounts?error=missing_params", baseUrl)
     );
   }
 
   const payload = verifyOAuthState(state);
   if (!payload) {
     return NextResponse.redirect(
-      new URL("/accounts?error=invalid_state", request.url)
+      new URL("/accounts?error=invalid_state", baseUrl)
     );
   }
 
@@ -122,14 +123,14 @@ export async function GET(request: NextRequest) {
 
     const count = 1 + orgUrns.length;
     return NextResponse.redirect(
-      new URL(`/accounts?success=${count}_connected`, request.url)
+      new URL(`/accounts?success=${count}_connected`, baseUrl)
     );
   } catch (error) {
     console.error("LinkedIn OAuth callback error:", error);
     return NextResponse.redirect(
       new URL(
         `/accounts?error=${encodeURIComponent(String(error))}`,
-        request.url
+        baseUrl
       )
     );
   }
