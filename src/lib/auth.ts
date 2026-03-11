@@ -48,6 +48,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      allowDangerousEmailAccountLinking: true,
     }),
     Credentials({
       name: "credentials",
@@ -81,31 +82,39 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     }),
   ],
   callbacks: {
-    async signIn({ user, account }) {
-      // Auto-create org for new OAuth users
-      if (account?.type === "oidc" || account?.type === "oauth") {
-        if (user.id) {
-          const existing = await db.member.findFirst({
-            where: { userId: user.id },
+    async jwt({ token, user }) {
+      if (user) {
+        token.sub = user.id;
+      }
+      if (token.sub) {
+        let member = await db.member.findFirst({
+          where: { userId: token.sub },
+          orderBy: { createdAt: "asc" },
+          select: { organizationId: true, role: true },
+        });
+        // Auto-create org for OAuth users with no organization
+        if (!member) {
+          const dbUser = await db.user.findUnique({
+            where: { id: token.sub },
+            select: { name: true, email: true },
           });
-          if (!existing) {
-            const baseName = user.name || user.email?.split("@")[0] || "Mon organisation";
+          if (dbUser) {
+            const baseName = dbUser.name || dbUser.email?.split("@")[0] || "Mon organisation";
             const baseSlug = baseName
               .toLowerCase()
               .replace(/[^a-z0-9]+/g, "-")
               .replace(/^-|-$/g, "");
-
-            // Atomic slug creation with retry on unique constraint violation
             for (let attempt = 0; attempt < 3; attempt++) {
               const slug = attempt === 0 ? baseSlug : `${baseSlug}-${randomBytes(3).toString("hex")}`;
               try {
-                await db.organization.create({
+                const org = await db.organization.create({
                   data: {
                     name: baseName,
                     slug,
-                    members: { create: { userId: user.id, role: "OWNER" } },
+                    members: { create: { userId: token.sub, role: "OWNER" } },
                   },
                 });
+                member = { organizationId: org.id, role: "OWNER" };
                 break;
               } catch (e) {
                 if (!isPrismaUniqueConstraintError(e) || attempt === 2) throw e;
@@ -113,19 +122,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             }
           }
         }
-      }
-      return true;
-    },
-    async jwt({ token, user }) {
-      if (user) {
-        token.sub = user.id;
-      }
-      if (token.sub) {
-        const member = await db.member.findFirst({
-          where: { userId: token.sub },
-          orderBy: { createdAt: "asc" },
-          select: { organizationId: true, role: true },
-        });
         token.organizationId = member?.organizationId ?? null;
         token.role = member?.role ?? null;
       }
