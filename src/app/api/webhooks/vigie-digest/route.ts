@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sendDigestEmail } from "@/lib/email";
 
+if (!process.env.WEBHOOK_API_KEY) {
+  console.warn("[webhook] WEBHOOK_API_KEY is not set — all webhook requests will be rejected");
+}
+
 export async function POST(req: NextRequest) {
   // Auth via shared secret
   const apiKey = req.headers.get("x-api-key");
-  if (!apiKey || apiKey !== process.env.WEBHOOK_API_KEY) {
+  if (!apiKey || !process.env.WEBHOOK_API_KEY || apiKey !== process.env.WEBHOOK_API_KEY) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

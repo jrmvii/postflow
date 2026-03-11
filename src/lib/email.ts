@@ -1,5 +1,14 @@
 import nodemailer from "nodemailer";
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 const transporter = nodemailer.createTransport({
   host: process.env.MAILGUN_SMTP_HOST || "smtp.mailgun.org",
   port: Number(process.env.MAILGUN_SMTP_PORT || 587),
@@ -21,16 +30,17 @@ export async function sendDigestEmail(
   groups: DigestGroup[],
   appUrl: string
 ) {
+  const feedLink = escapeHtml(`${appUrl}/feed`);
   const groupsHtml = groups
     .map((g) => {
-      const title = g.articles[0]?.title || "Groupe d'articles";
-      const sourcesList = g.sources.join(", ");
+      const title = escapeHtml(g.articles[0]?.title || "Groupe d'articles");
+      const sourcesList = escapeHtml(g.sources.join(", "));
       const articleCount = g.articles.length;
-      const feedLink = `${appUrl}/feed`;
+      const category = escapeHtml(g.category);
 
       return `
       <div style="margin-bottom:24px;padding:16px;border:1px solid #e5e7eb;border-radius:8px;">
-        <div style="font-size:11px;text-transform:uppercase;color:#6b7280;margin-bottom:4px;">${g.category}</div>
+        <div style="font-size:11px;text-transform:uppercase;color:#6b7280;margin-bottom:4px;">${category}</div>
         <div style="font-size:16px;font-weight:600;color:#111827;margin-bottom:8px;">${title}</div>
         <div style="font-size:13px;color:#6b7280;margin-bottom:12px;">
           ${articleCount} article${articleCount > 1 ? "s" : ""} · ${sourcesList}
@@ -51,7 +61,7 @@ export async function sendDigestEmail(
     ${groupsHtml}
     <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;" />
     <p style="font-size:12px;color:#9ca3af;">
-      Envoyé par <a href="${appUrl}" style="color:#2563eb;">Postflow</a>
+      Envoyé par <a href="${escapeHtml(appUrl)}" style="color:#2563eb;">Postflow</a>
     </p>
   </div>`;
 

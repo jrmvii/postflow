@@ -1,14 +1,9 @@
 "use server";
 
-import { readFile } from "fs/promises";
+import { unlink } from "fs/promises";
 import { db } from "@/lib/db";
 import { withAuth, canEdit } from "@/lib/with-auth";
-import { decrypt } from "@/lib/encryption";
-import {
-  createLinkedInPost,
-  initializeImageUpload,
-  uploadImageToLinkedIn,
-} from "@/lib/linkedin/client";
+import { publishPostInternal } from "@/lib/publish";
 import { saveUploadedFile, getUploadPath } from "@/lib/storage";
 import { z } from "zod";
 
@@ -126,79 +121,12 @@ export const publishPost = withAuth(async (session: any, postId: string) => {
   if (!post) return { error: "Post introuvable" };
   if (post.status === "PUBLISHED") return { error: "Déjà publié" };
 
-  // Mark as publishing
-  await db.post.update({
-    where: { id: postId },
-    data: { status: "PUBLISHING" },
-  });
-
-  let allSucceeded = true;
-
-  // Pre-read image if attached
-  const mediaAsset = post.media[0]?.mediaAsset ?? null;
-  let imageBuffer: Buffer | null = null;
-  if (mediaAsset) {
-    try {
-      imageBuffer = await readFile(getUploadPath(mediaAsset.storageKey));
-    } catch {
-      // Image file missing — continue without image
-    }
+  try {
+    const allSucceeded = await publishPostInternal(post);
+    return { success: allSucceeded };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Erreur de publication" };
   }
-
-  for (const target of post.targets) {
-    const account = target.socialAccount;
-    try {
-      const accessToken = decrypt(account.accessToken);
-
-      // Upload image to LinkedIn if present
-      let imageUrn: string | undefined;
-      if (imageBuffer && mediaAsset) {
-        const init = await initializeImageUpload(accessToken, account.platformId);
-        await uploadImageToLinkedIn(init.uploadUrl, imageBuffer, mediaAsset.mimeType);
-        imageUrn = init.imageUrn;
-      }
-
-      const result = await createLinkedInPost({
-        accessToken,
-        authorUrn: account.platformId,
-        content: post.content,
-        linkUrl: post.linkUrl ?? undefined,
-        imageUrn,
-      });
-
-      await db.postTarget.update({
-        where: { id: target.id },
-        data: {
-          status: result.success ? "PUBLISHED" : "FAILED",
-          platformPostId: result.postUrn ?? null,
-          errorMessage: result.error ?? null,
-          publishedAt: result.success ? new Date() : null,
-        },
-      });
-
-      if (!result.success) allSucceeded = false;
-    } catch (error) {
-      allSucceeded = false;
-      await db.postTarget.update({
-        where: { id: target.id },
-        data: {
-          status: "FAILED",
-          errorMessage: String(error),
-        },
-      });
-    }
-  }
-
-  await db.post.update({
-    where: { id: postId },
-    data: {
-      status: allSucceeded ? "PUBLISHED" : "FAILED",
-      publishedAt: allSucceeded ? new Date() : null,
-      errorMessage: allSucceeded ? null : "Un ou plusieurs posts ont échoué",
-    },
-  });
-
-  return { success: allSucceeded };
 });
 
 export const getPosts = withAuth(async (session: any) => {
@@ -282,6 +210,10 @@ export const updatePost = withAuth(async (session: any, formData: FormData) => {
   const hasNewImage = newImageFile && newImageFile.size > 0;
 
   if ((removeImage === "true" || hasNewImage) && post.media[0]) {
+    // Delete the physical file
+    try {
+      await unlink(getUploadPath(post.media[0].mediaAsset.storageKey));
+    } catch { /* file may already be missing */ }
     await db.postMedia.delete({ where: { id: post.media[0].id } });
     await db.mediaAsset.delete({ where: { id: post.media[0].mediaAssetId } });
   }
@@ -328,10 +260,18 @@ export const deletePost = withAuth(async (session: any, postId: string) => {
       id: postId,
       organizationId: session.user.organizationId,
     },
+    include: { media: { include: { mediaAsset: true } } },
   });
 
   if (!post) return { error: "Post introuvable" };
   if (post.status === "PUBLISHED") return { error: "Impossible de supprimer un post publié" };
+
+  // Delete physical files
+  for (const pm of post.media) {
+    try {
+      await unlink(getUploadPath(pm.mediaAsset.storageKey));
+    } catch { /* file may already be missing */ }
+  }
 
   await db.post.delete({ where: { id: postId } });
   return { success: true };

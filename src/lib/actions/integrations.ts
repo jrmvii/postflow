@@ -16,6 +16,17 @@ const configSchema = z.object({
   vigieCollection: z.string().optional().or(z.literal("")),
 });
 
+function maskKey(encryptedKey: string | null): string {
+  if (!encryptedKey) return "";
+  try {
+    const key = decrypt(encryptedKey);
+    if (key.length <= 4) return "••••";
+    return "••••" + key.slice(-4);
+  } catch {
+    return "••••";
+  }
+}
+
 export const getIntegrationConfig = withAuth(async (session) => {
   const config = await db.integrationConfig.findUnique({
     where: { organizationId: session.user.organizationId },
@@ -25,13 +36,17 @@ export const getIntegrationConfig = withAuth(async (session) => {
 
   return {
     positioUrl: config.positioUrl ?? "",
-    positioApiKey: config.positioApiKey ? decrypt(config.positioApiKey) : "",
+    positioApiKey: maskKey(config.positioApiKey),
+    hasPositioApiKey: !!config.positioApiKey,
     positioCollection: config.positioCollection ?? "",
     vigieUrl: config.vigieUrl ?? "",
-    vigieApiKey: config.vigieApiKey ? decrypt(config.vigieApiKey) : "",
+    vigieApiKey: maskKey(config.vigieApiKey),
+    hasVigieApiKey: !!config.vigieApiKey,
     vigieCollection: config.vigieCollection ?? "",
   };
 });
+
+const MASKED_KEY_PATTERN = /^••••/;
 
 export const saveIntegrationConfig = withOwnerAuth(
   async (session: AuthSession, formData: FormData) => {
@@ -47,16 +62,24 @@ export const saveIntegrationConfig = withOwnerAuth(
     const parsed = configSchema.safeParse(raw);
     if (!parsed.success) return { error: "Données invalides" };
 
+    // Load existing config to preserve keys when masked values are submitted
+    const existing = await db.integrationConfig.findUnique({
+      where: { organizationId: session.user.organizationId },
+    });
+
+    function resolveApiKey(newValue: string | undefined, existingEncrypted: string | null | undefined): string | null {
+      if (!newValue) return null;
+      // If the submitted value matches the mask pattern, keep existing encrypted key
+      if (MASKED_KEY_PATTERN.test(newValue) && existingEncrypted) return existingEncrypted;
+      return encrypt(newValue);
+    }
+
     const data = {
       positioUrl: parsed.data.positioUrl || null,
-      positioApiKey: parsed.data.positioApiKey
-        ? encrypt(parsed.data.positioApiKey)
-        : null,
+      positioApiKey: resolveApiKey(parsed.data.positioApiKey, existing?.positioApiKey),
       positioCollection: parsed.data.positioCollection || null,
       vigieUrl: parsed.data.vigieUrl || null,
-      vigieApiKey: parsed.data.vigieApiKey
-        ? encrypt(parsed.data.vigieApiKey)
-        : null,
+      vigieApiKey: resolveApiKey(parsed.data.vigieApiKey, existing?.vigieApiKey),
       vigieCollection: parsed.data.vigieCollection || null,
     };
 

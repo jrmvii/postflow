@@ -22,6 +22,19 @@ export const connectLinkedIn = withAuth(async (session: any) => {
 export const getSocialAccounts = withAuth(async (session: any) => {
   return db.socialAccount.findMany({
     where: { organizationId: session.user.organizationId },
+    select: {
+      id: true,
+      organizationId: true,
+      platform: true,
+      accountType: true,
+      platformId: true,
+      displayName: true,
+      avatarUrl: true,
+      tokenExpiresAt: true,
+      isActive: true,
+      createdAt: true,
+      updatedAt: true,
+    },
     orderBy: { createdAt: "desc" },
   });
 });

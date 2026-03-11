@@ -5,6 +5,32 @@ import bcrypt from "bcryptjs";
 import { signIn } from "@/lib/auth";
 import { z } from "zod";
 
+// Simple in-memory rate limiter
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const registerAttempts = new Map<string, { count: number; resetAt: number }>();
+
+const LOGIN_LIMIT = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const REGISTER_LIMIT = 3;
+const REGISTER_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+function checkRateLimit(
+  store: Map<string, { count: number; resetAt: number }>,
+  key: string,
+  limit: number,
+  windowMs: number
+): boolean {
+  const now = Date.now();
+  const entry = store.get(key);
+  if (!entry || now > entry.resetAt) {
+    store.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (entry.count >= limit) return false;
+  entry.count++;
+  return true;
+}
+
 const registerSchema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
@@ -26,6 +52,10 @@ export async function register(formData: FormData) {
   }
 
   const { name, email, password, orgName } = parsed.data;
+
+  if (!checkRateLimit(registerAttempts, email, REGISTER_LIMIT, REGISTER_WINDOW_MS)) {
+    return { error: "Trop de tentatives. Réessayez plus tard." };
+  }
 
   const existing = await db.user.findUnique({ where: { email } });
   if (existing) {
@@ -77,6 +107,10 @@ export async function login(formData: FormData) {
 
   if (!email || !password) {
     return { error: "Email et mot de passe requis" };
+  }
+
+  if (!checkRateLimit(loginAttempts, email, LOGIN_LIMIT, LOGIN_WINDOW_MS)) {
+    return { error: "Trop de tentatives. Réessayez dans 15 minutes." };
   }
 
   try {

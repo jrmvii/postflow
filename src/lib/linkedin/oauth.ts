@@ -40,6 +40,31 @@ export async function exchangeCodeForTokens(code: string) {
   }>;
 }
 
+export async function refreshAccessToken(refreshToken: string): Promise<{
+  access_token: string;
+  expires_in: number;
+  refresh_token?: string;
+  refresh_token_expires_in?: number;
+}> {
+  const response = await fetch(LINKEDIN_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: process.env.LINKEDIN_CLIENT_ID!,
+      client_secret: process.env.LINKEDIN_CLIENT_SECRET!,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`LinkedIn token refresh failed: ${error}`);
+  }
+
+  return response.json();
+}
+
 function getRedirectUri(): string {
   const base = process.env.NEXTAUTH_URL || "http://localhost:3000";
   return `${base}/api/linkedin/callback`;

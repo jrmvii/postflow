@@ -59,7 +59,7 @@ export default function EditPostPage() {
       if (post.media?.[0]?.mediaAsset) {
         const key = post.media[0].mediaAsset.storageKey;
         setExistingImageKey(key);
-        setImagePreview(`/uploads/${key}`);
+        setImagePreview(`/api/uploads/${key}`);
       }
 
       if (Array.isArray(accountsResult)) {
